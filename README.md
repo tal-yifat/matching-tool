@@ -1,2 +1,3 @@
 # matching-tool
-This tool integrated new records into a large database with 250 years of social network data.
+This is a tool that takes as input a database table with new historical records about people in Reneissance Florence (a "component table"), and recommends whether the record should be identified as an existing person in the database. There are about 50k existing people in the database, and the information about them is summarized in a "master table". The tool produces the results as a new table. This is a proof of concept phase that tests an initial prototype of the tool with a table of new records that have been manualy identified, and compares the automatic recommendations to the manual ones.
+
