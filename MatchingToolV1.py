@@ -1,47 +1,65 @@
-def InitDB():
-    import pypyodbc 
-    connection_string = 'Driver={Microsoft Access Driver (*.mdb)};DBQ=C:\\Users\Tal\Documents\LocalData\PadgettlabLocal\FlorenceTest.mdb'
-    connection = pypyodbc.connect(connection_string)
-    cursor =  connection.cursor() 
-    return connection
+###
+# This program examines whether a new record from archival sources can be identified
+# as an existing person in the database.
+#
+# Input = "component table" from a local Access database
+# Output = a table with identity recommendations for each component record,  
+#   compared with the results of the manual identification for that record.
+###
 
+import pypyodbc 
 
-def CloseDB ():
-    cursor.close()
-    connection.close()
+# Global variables for DB connection
+connection = None
+cursor = None
+connection_string = 'Driver={Microsoft Access Driver (*.mdb)};DBQ=C:\\Users\Tal\Documents\LocalData\PadgettlabLocal\FlorenceTest.mdb'
+        
 
+def TestComponentTable (starti = 1, stopi = 5167):
+    # This function is used to run the tool and test it for a range of records in the table. 
+    i = starti
+    while i <= stopi:
+        TestCR(i)
+        i = i + 1        
 
-
-
-
-
-
-
-
-class DataField:
-    def __init__(self, value):
-        self.dbvalue = value
-        self.svalue = None
+def TestCR(id):
+    # This function identifies a single new record from the component table.
+    CR = ComponentRecord(id)
+    if CR.CRexists and CR.id:
+        CR.StandardizeAll()
+        if CR.GetMatches(): CR.AssessMatches()
+        CR.Recommend()
+        return CR
 
 class ComponentRecord:
+    # An object of this class represents one new record from the component table. 
+    
     def __init__(self, index):
+    # Initialize an object and retrieve the data relevant for indentification.
         self.tblMaster = "tblMaster_040315"
         cursor.execute ('SELECT LNAME, FNAME, MNAME, M2NAME, NB, ID FROM tbl458catasto WHERE LINE_NUM = ' + str(index))
-        """ [verify there is only one row] """
         rows = cursor.fetchall() 
         if not rows: 
             self.CRexists = False
             return
         else: self.CRexists = True
         for row in rows:
-             self.lname = DataField (row[0])
-             self.fname = DataField (row[1])
-             self.mname = DataField (row[2])
-             self.m2name = DataField (row[3])
-             self.nb = DataField (row[4])
-             self.id = row['id']
+             self.lname = DataField (row[0]) # last name
+             self.fname = DataField (row[1]) # first name
+             self.mname = DataField (row[2]) # middle name 1
+             self.m2name = DataField (row[3]) # middle name 2
+             self.nb = DataField (row[4]) # neighborhood of residence
+             self.id = row['id'] # the id of the historical record
              self.line_num = index
-             self.year = 1458
+             self.year = 1458 # all records in this table are from the census of 1458.
+
+    def StandardizeAll (self):
+        # Standardize the data
+        self.StandardizeLastName()
+        if self.fname.dbvalue: self.StandardizeGivenName(self.fname)
+        if self.mname.dbvalue: self.StandardizeGivenName(self.mname)
+        if self.m2name.dbvalue: self.StandardizeGivenName(self.m2name)
+        if self.nb.dbvalue: self.StandardizeNB()
 
     def StandardizeLastName (self):
         if self.lname.dbvalue:
@@ -49,8 +67,9 @@ class ComponentRecord:
             self.lname.svalue = SplittedLname[0].lower()
         else: self.lname.svalue = None
         
-
     def StandardizeGivenName (self, name):    
+        # Standardize first and middle names based on the way these names have been 
+        # most commonly standardized for existing records in the database.
         cursor.execute ("SELECT StandardName, Appearances FROM NS3 WHERE NonStandardName = '{0}' ORDER BY Appearances DESC".format(name.dbvalue))
         row = cursor.fetchone()
         if not row:
@@ -60,14 +79,8 @@ class ComponentRecord:
     def StandardizeNB (self):
         self.nb.svalue = self.nb.dbvalue
 
-    def StandardizeAll (self):
-        self.StandardizeLastName()
-        if self.fname.dbvalue: self.StandardizeGivenName(self.fname)
-        if self.mname.dbvalue: self.StandardizeGivenName(self.mname)
-        if self.m2name.dbvalue: self.StandardizeGivenName(self.m2name)
-        if self.nb.dbvalue: self.StandardizeNB()
-
     def PrintCR (self):
+        # Print database and standardized values. Used for debugging. 
         print ("lname db:{0:18} std:{1:8}".format(str(self.lname.dbvalue), str(self.lname.svalue)))
         print ("fname db:{0:18} std:{1:8}".format(str(self.fname.dbvalue), str(self.fname.svalue)))
         print ("mname  db:{0:18} std:{1:8}".format(str(self.mname.dbvalue), str(self.mname.svalue)))
@@ -75,6 +88,8 @@ class ComponentRecord:
         print ("nb  db:{0:18} std:{1:8}".format(str(self.nb.dbvalue), str(self.nb.svalue)))
 
     def GetMatches (self):
+        # Get from Master table data on all the existing people in the database with 
+        # names similar to the component record
         if not self.fname.svalue:
             print('no fname')
             return False
@@ -91,6 +106,7 @@ class ComponentRecord:
             else: return True
 
     def AssessMatches (self):
+        # For each possible match, compute a score that assesses the quality of the match.
         self.MRs = []
         self.i = 0
         for row in self.matches:
@@ -98,16 +114,15 @@ class ComponentRecord:
 
         for row in self.matches:
             if row['casen'] == 1: 
-                self.MRs[self.i].NBs()
-                self.MRs[self.i].Names()
+                self.MRs[self.i].NBs() # assess neighborhood fitness
+                self.MRs[self.i].Names() # assess fitness 
                 self.MRs[self.i].Years()
                 self.MRs[self.i].overallfitness = self.MRs[self.i].nbfitness * self.MRs[self.i].namefitness * self.MRs[self.i].yearfitness
 #               print("{0}   {1}    {2}    {3}      {4}".format(self.MRs[self.i].row['id'], self.MRs[self.i].nbfitness, self.MRs[self.i].namefitness, self.MRs[self.i].yearfitness, self.MRs[self.i].overallfitness))  
             self.i = self.i+1
 
-
     def Recommend (self):
-# Make a recommendation based on fitness scores and insert results in a table
+        # Make a recommendation based on fitness scores and insert results in a table
         self.bestmatches = []
         maxfitness = 0
         self.noyears = False
@@ -141,14 +156,18 @@ class ComponentRecord:
 
 
 class MasterRecord:
+    # An object of this class represents one possible match from the Master table to the new record. 
+
     def __init__(self, row, CR):
         self.row = row
         self.CR = CR
         self.overallfitness = 0
         self.noyears = False  
       
-
     def NBs(self):
+        # Assess the match of the neighborhood
+        
+        # Create a list of all the neighborhoods associated with the existing person
         self.nbs = []
         self.nbs.append(self.row['bngh'])
         self.nbs.append(self.row['ngh351'])
@@ -160,10 +179,9 @@ class MasterRecord:
         self.nbs.append(self.row['scrut411ngh'])
         self.nbs.append(self.row['ngh427'])
         self.nbs.append(self.row['scrut433ngh'])
-#        self.nbs.append(self.row['ngh458'])
         self.nbs.append(self.row['gonfngh'])
         self.nbs.append(self.row['ngh480'])
-
+    
         self.nbfitness = 0.65
         for nb in self.nbs:
             if nb == self.CR.nb.svalue:
@@ -178,6 +196,7 @@ class MasterRecord:
             self.nbfitness = 0.5 
 
     def Names(self):
+        # Assess the match of the names       
         if not self.row['mlname'] or not self.CR.lname.svalue: self.lnamefit = None
         elif self.CR.lname.svalue in self.row['mlname'].lower(): self.lnamefit = True
         else: self.lnamefit = False 	
@@ -191,14 +210,16 @@ class MasterRecord:
         elif self.row['smm2name'].lower() == self.CR.m2name.svalue: self.m2namefit = True
         else: self.m2namefit = False 	
 
+        #This dictionary holds the decision making logic, based on the match of the 
+        # last name, first name, and middle name. 
         DecisionMatrix = {
-            (True, True, True):1,
-            (True, True, None):.85,
-            (None, True, True):.7,
-            (False, True, True):.5,
-            (True, False, True):.5,
-            (True, True, False):.5
-        }
+             (True, True, True):1,
+             (True, True, None):.85,
+             (None, True, True):.7,
+             (False, True, True):.5,
+             (True, False, True):.5,
+             (True, True, False):.5
+         }
 
         try:
             self.namefitness = DecisionMatrix[self.lnamefit, self.fnamefit, self.mnamefit]
@@ -209,6 +230,7 @@ class MasterRecord:
 		
 
     def Years(self):
+        # Assess the match of the years        
         self.married = []
         self.guildmatric = []
         self.politicaloffices = []
@@ -228,8 +250,7 @@ class MasterRecord:
                 else: break
 
 
-# add treatment for different cases
-
+        # Add all possible year references for a person
         if self.row['lanam']: self.guildmatric.append(self.row['lanam'])
         if self.row['ritagl_matr']: self.guildmatric.append(self.row['ritagl_matr'])
         if self.row['silkm']: self.guildmatric.append(self.row['silkm'])
@@ -273,8 +294,7 @@ class MasterRecord:
 
         self.allyears = self.married + self.guildmatric + self.politicaloffices + self.taxcensuses + self.otherrecords
 
-# Here comes the fit calculation, which may need to be adjusted for disfferent component tables. 
-
+        # Here comes the fit calculation. the logics may need to be adjusted for different component tables. 
         if self.byr and self.dyr:
             if self.byr < self.CR.year < self.dyr: self.yearfitness = 1 
         elif self.byr and not self.dyr and self.allyears: 
@@ -298,31 +318,29 @@ class MasterRecord:
             elif (max(self.allyears) - 65 < self.CR.year < min(self.allyears) + 65): self.yearfitness = .75
             elif (max(self.allyears) - 80 < self.CR.year < min(self.allyears) + 80): self.yearfitness = .5
         else: self.noyears = True
-        
-        
-        
-        
-def TestComponentTable (starti, stopi):
-    i = starti
-    while i <= stopi:
-        TestCR(i)
-        i = i + 1
-        
-        
-        
-        
-        
-def TestCR(id):
-    CR = ComponentRecord(id)
-    if CR.CRexists and CR.id:
-        CR.StandardizeAll()
-        if CR.GetMatches(): CR.AssessMatches()
-        CR.Recommend()
-        return CR
-    
-CR = TestCR()
-TestComponentTable (, )
 
+
+class DataField:
+    def __init__(self, value):
+        self.dbvalue = value
+        self.svalue = None
+
+def InitDB():    
+    connection = pypyodbc.connect(connection_string)
+    cursor =  connection.cursor() 
+    return connection
+
+def CloseDB():
+    cursor.close()
+    connection.close()
+
+        
+        
+        
+
+InitDB()    
+TestComponentTable()
+CloseDB ()
 
 
 
