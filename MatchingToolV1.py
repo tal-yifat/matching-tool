@@ -38,7 +38,11 @@ class ComponentRecord:
     # Initialize an object and retrieve the data relevant for indentification.
         self.tblMaster = "tblMaster_040315"
         cursor.execute ('SELECT LNAME, FNAME, MNAME, M2NAME, NB, ID FROM tbl458catasto WHERE LINE_NUM = ' + str(index))
-        rows = cursor.fetchall() 
+        # Having a distinct query for each record is obviously not very efficient. However, 
+        # this was my first Python program, and I wasn't sure how to load the tables I needed
+        # into Python data sctructures and work directly with these structures. For my purposes then,
+        # moving quickly with the development was more important then the difference in efficiency. 
+	rows = cursor.fetchall() 
         if not rows: 
             self.CRexists = False
             return
